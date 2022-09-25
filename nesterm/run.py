@@ -1,21 +1,22 @@
 from __future__ import annotations
+from argparse import ArgumentParser, Namespace
 
 import pickle
 from copy import deepcopy
 from enum import IntEnum
-from typing import Optional
 from functools import lru_cache
 from dataclasses import dataclass, field
 import zlib
 
 
 import numpy as np
+import numpy.typing as npt
 from gambaterm.console import Console
 from gambaterm.main import main as gambaterm_main
 
-from . import nescpu  # type: ignore
-from . import nesppu  # type: ignore
-from . import nesapu  # type: ignore
+from . import nescpu
+from . import nesppu
+from . import nesapu
 
 
 class InfiniteLoop(Exception):
@@ -29,7 +30,7 @@ class Cartridge:
     cartridge_has_prg_ram: bool
     has_trainer: bool
     ignore_mirroring_control: bool
-    trainer: Optional[bytes]
+    trainer: bytes | None
     prg_rom: bytes
     chr_rom: bytes
 
@@ -123,12 +124,12 @@ class Pulse:
     decay_level_counter: int = 0
     current_timer_period: int = 0
 
-    def set_enabled(self, value):
+    def set_enabled(self, value: bool) -> None:
         self.enabled = value
         if not value:
             self.length_counter = 0
 
-    def write_register(self, register: ApuRegister, value):
+    def write_register(self, register: ApuRegister, value: int) -> None:
         if (register & ~0x04) == register.PULSE1_CONFIG:
             self.duty = value >> 6
             self.length_counter_halt = bool(value & 0x20)
@@ -161,7 +162,7 @@ class Pulse:
             return
         assert False
 
-    def generate(self):
+    def generate(self) -> npt.NDArray[np.uint8]:
         result = np.zeros(Apu.TICKS_IN_FRAME, dtype=np.uint8)
         if not self.enabled:
             return result
@@ -186,12 +187,12 @@ class Triangle:
     current_sequencer: int = 0
     counter_reload_flag: int = 0
 
-    def set_enabled(self, value):
+    def set_enabled(self, value: bool) -> None:
         self.enabled = value
         if not value:
             self.length_counter = 0
 
-    def write_register(self, register: ApuRegister, value):
+    def write_register(self, register: ApuRegister, value: int) -> None:
         if register == register.TRIANGLE_CONFIG:
             self.length_counter_halt = bool(value & 0x80)
             self.load_counter = value & 0x7F
@@ -214,7 +215,7 @@ class Triangle:
             return
         assert False
 
-    def generate(self):
+    def generate(self) -> npt.NDArray[np.uint8]:
         result = np.zeros(Apu.TICKS_IN_FRAME, dtype=np.uint8)
         nesapu.generate_triangle(self, result)
         return result
@@ -259,12 +260,12 @@ class Noise:
         4068,
     ]
 
-    def set_enabled(self, value):
+    def set_enabled(self, value: bool) -> None:
         self.enabled = value
         if not value:
             self.length_counter = 0
 
-    def write_register(self, register: ApuRegister, value):
+    def write_register(self, register: ApuRegister, value: int) -> None:
         if register == register.NOISE_CONFIG:
             self.length_counter_halt = bool(value & 0x20)
             self.constant_volume = bool(value & 0x10)
@@ -287,7 +288,7 @@ class Noise:
             return
         assert False
 
-    def generate(self):
+    def generate(self) -> npt.NDArray[np.uint8]:
         result = np.zeros(Apu.TICKS_IN_FRAME, dtype=np.uint8)
         nesapu.generate_noise(self, result)
         return result
@@ -321,7 +322,7 @@ class Apu:
 
     TICKS_IN_FRAME = 14890
 
-    def write_register(self, cpu: "Cpu", register: int, value: int):
+    def write_register(self, cpu: Cpu, register: int, value: int) -> None:
         register = ApuRegister(register)
         if register == register.FRAME_COUNTER:
             self.frame_counter_mode = value >> 7
@@ -379,13 +380,13 @@ class Apu:
             raise NotImplementedError(register)
         assert False
 
-    def generate_dmc(self):
+    def generate_dmc(self) -> npt.NDArray[np.uint8]:
         result = np.zeros(Apu.TICKS_IN_FRAME, dtype=np.uint8)
         if not self.dmc_enabled:
             return result
         raise NotImplementedError
 
-    def generate(self, audio, frame):
+    def generate(self, audio: npt.NDArray[np.int16]) -> None:
         # self.pulse1.set_enabled(False)
         # self.pulse2.set_enabled(False)
         # self.triangle.set_enabled(False)
@@ -452,32 +453,32 @@ class Ppu:
     # Properties from PPUCTRL
 
     @property
-    def background_pattern_table_address(self):
+    def background_pattern_table_address(self) -> int:
         return 0x1000 if (self.ctrl & 0x10) else 0x0000
 
     @property
-    def sprite_pattern_table_address(self):
+    def sprite_pattern_table_address(self) -> int:
         return 0x1000 if (self.ctrl & 0x08) else 0x0000
 
     @property
-    def sprite_size(self):
+    def sprite_size(self) -> tuple[int, int]:
         return (8, 16) if (self.ctrl & 0x20) else (8, 8)
 
     @property
-    def ram_address_increment(self):
+    def ram_address_increment(self) -> int:
         return 32 if (self.ctrl & 0x04) else 1
 
     # Properties from PPUMASK
 
     @property
-    def show_background(self):
+    def show_background(self) -> bool:
         return bool(self.mask & 0x08)
 
     @property
-    def show_sprites(self):
+    def show_sprites(self) -> bool:
         return bool(self.mask & 0x10)
 
-    def new_vblank(self):
+    def new_vblank(self) -> None:
         self.x_scroll = 0
         self.y_scroll = 0
         self.scroll_toggle = 0
@@ -494,7 +495,7 @@ class Ppu:
         self.background_palette_changed = False
         self.background_pattern_table_address_changed = False
 
-    def read_register(self, cpu: "Cpu", reg: int) -> int:
+    def read_register(self, cpu: Cpu, reg: int) -> int:
         if reg == PpuRegister.PPUCTRL:
             return self.ctrl
         if reg == PpuRegister.PPUMASK:
@@ -543,7 +544,7 @@ class Ppu:
             return result
         assert False
 
-    def write_register(self, cpu: "Cpu", reg: int, value: int):
+    def write_register(self, cpu: "Cpu", reg: int, value: int) -> None:
         if reg == PpuRegister.PPUCTRL:
             old_address = self.background_pattern_table_address
             self.ctrl = value
@@ -582,7 +583,7 @@ class Ppu:
             return
         assert False, reg
 
-    def write_oam(self, data: bytes):
+    def write_oam(self, data: bytes) -> None:
         assert len(data) == 256
         self.oam[:] = data
 
@@ -599,7 +600,7 @@ class Ppu:
             raise NotImplementedError
         raise ValueError(f"Invalid PPU read: 0x{addr:04x}")
 
-    def ppu_write(self, addr: int, value: int):
+    def ppu_write(self, addr: int, value: int) -> None:
         # Ram access
         if 0x2000 <= addr < 0x3000:
             a_addr = addr & 0x3FF
@@ -633,17 +634,17 @@ class Ppu:
             return
         raise ValueError(f"Invalid PPU write: 0x{addr:04x}")
 
-    def render(self, video):
+    def render(self, video: npt.NDArray[np.uint32]) -> None:
         self.render_background_color(video)
         self.render_sprite(video, behind=True)
         self.render_background(video)
         self.render_sprite(video, behind=False)
 
-    def render_background_color(self, video):
+    def render_background_color(self, video: npt.NDArray[np.uint32]) -> None:
         background_color = self.palette[0]
         video.fill(nesppu.get_color(background_color))
 
-    def update_tiles(self):
+    def update_tiles(self) -> None:
         base_pattern_address = self.background_pattern_table_address
         # Draw everything
         if (
@@ -658,7 +659,7 @@ class Ppu:
         for (y_index, x_index) in self.background_tile_changed:
             self.update_tile(y_index, x_index, base_pattern_address)
 
-    def index_to_addr(self, y, x):
+    def index_to_addr(self, y: int, x: int) -> tuple[int, int]:
         nametable = ((y & 0x20) << 6) | ((x & 0x20) << 5)
         pattern = nametable | ((y & 0b00011111) << 5) | (x & 0b00011111)
         palette = nametable | 0x03C0
@@ -666,7 +667,7 @@ class Ppu:
         palette |= (x & 0b00011100) >> 2
         return pattern, palette
 
-    def addr_to_indexes(self, addr):
+    def addr_to_indexes(self, addr: int) -> list[tuple[int, int]]:
         y = ((addr >> 11) & 0x01) << 5
         x = ((addr >> 10) & 0x01) << 5
         addr &= 0x3FF
@@ -678,7 +679,9 @@ class Ppu:
         x |= (addr & 0b00000111) << 2
         return [(y | dy, x | dx) for dy in range(4) for dx in range(4)]
 
-    def update_tile(self, y_index, x_index, base_pattern_address):
+    def update_tile(
+        self, y_index: int, x_index: int, base_pattern_address: int
+    ) -> None:
         # Filter
         if y_index in (30, 31, 62, 63):
             return
@@ -708,7 +711,7 @@ class Ppu:
             y_pixel -= 16
         self.background_tiles[y_pixel : y_pixel + 8, x_pixel : x_pixel + 8] = tile
 
-    def render_background(self, video):
+    def render_background(self, video: npt.NDArray[np.uint32]) -> None:
         self.update_tiles()
         if not self.show_background:
             return
@@ -729,7 +732,9 @@ class Ppu:
             (sprite_zero_hit_y - first_row, 512 - x_scroll),
         )
 
-    def render_sprite(self, video, behind=False):
+    def render_sprite(
+        self, video: npt.NDArray[np.uint32], behind: bool = False
+    ) -> None:
         if not self.show_sprites:
             return
         assert self.sprite_size == (8, 8)
@@ -762,7 +767,7 @@ class Ppu:
             nesppu.blit(tile, video, (y - first_row, x))
 
     @lru_cache(maxsize=None)
-    def render_tile(self, pattern_addr, colors):
+    def render_tile(self, pattern_addr: int, colors: bytes) -> npt.NDArray[np.uint32]:
         result = np.zeros((8, 8), dtype=np.uint32)
         nesppu.render_tile(self.cartridge.chr_rom, pattern_addr, colors, result)
         return result
@@ -798,7 +803,7 @@ class Cpu:
     input_value: int = 0
 
     @property
-    def rom(self):
+    def rom(self) -> bytes:
         return self.cartridge.prg_rom
 
     # CPU Bus access
@@ -830,7 +835,7 @@ class Cpu:
         # Invalid access
         raise ValueError(f"Invalid read access: 0x{addr:04x} (pc=0x{self.pc:04x})")
 
-    def cpu_write(self, addr: int, value: int):
+    def cpu_write(self, addr: int, value: int) -> None:
         # Ram access
         if 0 <= addr < 0x0800:
             self.ram[addr] = value
@@ -864,18 +869,18 @@ class Cpu:
 
     # Entry points
 
-    def load_nmi_entrypoint(self):
+    def load_nmi_entrypoint(self) -> None:
         self.frame += 1
         self.pc = self.cpu_read(0xFFFA)
         self.pc |= self.cpu_read(0xFFFB) << 8
 
-    def load_rst_entrypoint(self):
+    def load_rst_entrypoint(self) -> None:
         self.pc = self.cpu_read(0xFFFC)
         self.pc |= self.cpu_read(0xFFFD) << 8
 
     # Run CPU instructions
 
-    def run_instructions(self):
+    def run_instructions(self) -> None:
         jmp = 0x4C
         rti = 0x40
         opc = nescpu.run(self)
@@ -938,10 +943,10 @@ class Nes(Console):
     }
 
     @classmethod
-    def add_console_arguments(cls, parser):
+    def add_console_arguments(cls, parser: ArgumentParser) -> None:
         pass
 
-    def __init__(self, parser_args):
+    def __init__(self, parser_args: Namespace) -> None:
         self.current_state = 0
         self.romfile = parser_args.romfile
         self.cartridge = parse_ines(self.romfile)
@@ -965,16 +970,18 @@ class Nes(Console):
     def ppu(self) -> Ppu:
         return self.cpu.ppu
 
-    def set_input(self, input_set):
+    def set_input(self, input_set: set[Console.Input]) -> None:
         value = sum(self.INPUT_MAP.get(key, 0) for key in input_set)
         self.cpu.input_value = value
 
-    def advance_one_frame(self, video, audio):
+    def advance_one_frame(
+        self, video: npt.NDArray[np.uint32], audio: npt.NDArray[np.int16]
+    ) -> tuple[bool, int]:
         self.ppu.new_vblank()
         self.cpu.load_nmi_entrypoint()
         self.cpu.run_instructions()
         self.ppu.render(video)
-        self.apu.generate(audio, self.cpu.frame)
+        self.apu.generate(audio)
         return True, self.TICKS_IN_FRAME
 
     def set_current_state(self, state: int) -> None:
@@ -1003,8 +1010,8 @@ class Nes(Console):
             f.write(zlib.compress(pickle.dumps(cpu)))
 
 
-def main(parser_args=None):
-    return gambaterm_main(parser_args, console_cls=Nes)
+def main(parser_args: tuple[str, ...] | None = None) -> None:
+    gambaterm_main(parser_args, console_cls=Nes)
 
 
 if __name__ == "__main__":

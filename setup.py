@@ -57,6 +57,7 @@ setup(
             "nesterm-ssh = nesterm.ssh:main",
         ],
     },
+    package_data={"nesterm": ["py.typed"]},
     description="A NES emulator running in the terminal",
     long_description=LONG_DESCRIPTION,
     long_description_content_type="text/markdown",

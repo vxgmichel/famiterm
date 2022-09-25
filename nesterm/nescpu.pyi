@@ -1,0 +1,3 @@
+from .run import Cpu
+
+def run(cpu: Cpu) -> int: ...
