@@ -38,7 +38,7 @@ nesapu_extension = Extension(
 
 setup(
     name="famiterm",
-    version="0.1.0",
+    version="0.1.1",
     packages=["famiterm"],
     setup_requires=["setuptools>=42", "Cython>=0.29.13", "numpy"],
     ext_modules=[
