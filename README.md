@@ -1,5 +1,5 @@
-nesterm
--------
+famiterm
+--------
 
 A NES emulator running in the terminal.
 

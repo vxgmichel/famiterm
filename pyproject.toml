@@ -19,7 +19,7 @@ disallow_untyped_decorators = true
 [tool.cibuildwheel]
 build = "cp*-win_amd64 cp*-manylinux_x86_64 cp*-macosx_x86_64"
 skip = "cp36*"
-test-command = "nesterm --help"
+test-command = "famiterm --help"
 
 [tool.cibuildwheel.linux]
 before-all = "yum install -y libsamplerate portaudio openssh-clients"

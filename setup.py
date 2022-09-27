@@ -20,26 +20,26 @@ class NumpyIncludePath(os.PathLike):
 
 # Extensions
 nescpu_extension = Extension(
-    "nesterm.nescpu",
+    "famiterm.nescpu",
     include_dirs=[NumpyIncludePath()],
     sources=["ext/nescpu.pyx"],
 )
 nesppu_extension = Extension(
-    "nesterm.nesppu",
+    "famiterm.nesppu",
     include_dirs=[NumpyIncludePath()],
     sources=["ext/nesppu.pyx"],
 )
 nesapu_extension = Extension(
-    "nesterm.nesapu",
+    "famiterm.nesapu",
     include_dirs=[NumpyIncludePath()],
     sources=["ext/nesapu.pyx"],
 )
 
 
 setup(
-    name="nesterm",
+    name="famiterm",
     version="0.1.0",
-    packages=["nesterm"],
+    packages=["famiterm"],
     setup_requires=["setuptools>=42", "Cython>=0.29.13", "numpy"],
     ext_modules=[
         nescpu_extension,
@@ -53,15 +53,15 @@ setup(
     python_requires=">=3.7",
     entry_points={
         "console_scripts": [
-            "nesterm = nesterm:main",
-            "nesterm-ssh = nesterm.ssh:main",
+            "famiterm = famiterm:main",
+            "famiterm-ssh = famiterm.ssh:main",
         ],
     },
-    package_data={"nesterm": ["py.typed"]},
+    package_data={"famiterm": ["py.typed"]},
     description="A NES emulator running in the terminal",
     long_description=LONG_DESCRIPTION,
     long_description_content_type="text/markdown",
-    url="https://github.com/vxgmichel/nesterm",
+    url="https://github.com/vxgmichel/famiterm",
     license="GPLv3",
     classifiers=[
         "Programming Language :: Python",
