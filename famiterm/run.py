@@ -443,7 +443,7 @@ class Ppu:
     # Changes
     background_pattern_table_address_changed: bool = False
     background_tile_changed: set[tuple[int, int]] = field(default_factory=set)
-    background_tiles: np.ndarray = field(
+    background_tiles: npt.NDArray[np.uint32] = field(
         default_factory=lambda: np.zeros((240 * 2, 256 * 2), dtype=np.uint32)
     )
     background_tiles_with_palette: list[set[tuple[int, int]]] = field(

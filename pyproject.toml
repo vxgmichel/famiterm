@@ -8,12 +8,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.mypy]
-warn_return_any = true
-disallow_untyped_calls = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
+strict = true
 
 
 [tool.cibuildwheel]

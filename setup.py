@@ -1,13 +1,13 @@
 import os
 from pathlib import Path
-from setuptools import Extension, setup  # type: ignore
+from setuptools import Extension, setup
 
 # Read the contents of the README file
 LONG_DESCRIPTION = (Path(__file__).parent / "README.md").read_text()
 
 
 # Defer call to `numpy.get_include`
-class NumpyIncludePath(os.PathLike):
+class NumpyIncludePath:
     def __str__(self) -> str:
         return self.__fspath__()
 
