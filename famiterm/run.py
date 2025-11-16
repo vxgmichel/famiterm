@@ -583,7 +583,7 @@ class Ppu:
             return
         assert False, reg
 
-    def write_oam(self, data: bytes) -> None:
+    def write_oam(self, data: bytes | bytearray | memoryview) -> None:
         assert len(data) == 256
         self.oam[:] = data
 
@@ -656,7 +656,7 @@ class Ppu:
                     self.update_tile(y_index, x_index, base_pattern_address)
             return
         # Draw changes
-        for (y_index, x_index) in self.background_tile_changed:
+        for y_index, x_index in self.background_tile_changed:
             self.update_tile(y_index, x_index, base_pattern_address)
 
     def index_to_addr(self, y: int, x: int) -> tuple[int, int]:
