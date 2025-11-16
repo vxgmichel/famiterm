@@ -1,9 +1,9 @@
 [build-system]
 requires = [
-    "setuptools>=61",
+    "setuptools>=61.0",
     "wheel",
-    "Cython>=2.3",
-    "oldest-supported-numpy",
+    "Cython>=3.2.1",
+    "numpy>=2.0,<3",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -28,12 +28,12 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "numpy>=1.20,<3.0",
+    "numpy>=2.0,<3.0",
     "gambaterm>=0.13.0",
 ]
 
 [project.optional-dependencies]
-controller-support = ["pygame>=1.9.5"]
+controller-support = ["pygame>=1.9.5,<2.0.0"]
 
 [project.scripts]
 famiterm = "famiterm:main"
@@ -53,8 +53,8 @@ strict = true
 
 
 [tool.cibuildwheel]
-build = "cp*-win_amd64 cp*-manylinux_x86_64 cp*-macosx_x86_64"
-skip = "cp36*"
+build = "cp*-win_amd64 cp*-manylinux_x86_64 cp*-macosx_x86_64 cp*-macosx_arm64"
+skip = ["cp38-*", "cp3??t-*"]
 test-command = "famiterm --help"
 
 [tool.cibuildwheel.linux]
