@@ -1,11 +1,52 @@
 [build-system]
 requires = [
-    "setuptools>=42",
+    "setuptools>=61",
     "wheel",
-    "Cython>=0.29.13",
+    "Cython>=2.3",
     "oldest-supported-numpy",
 ]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "famiterm"
+version = "0.1.1"
+description = "A NES emulator running in the terminal"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "GPL-3.0-only"
+authors = [
+    {name = "Vincent Michel", email = "vxgmichel@gmail.com"}
+]
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "numpy>=1.20,<3.0",
+    "gambaterm>=0.13.0",
+]
+
+[project.optional-dependencies]
+controller-support = ["pygame>=1.9.5"]
+
+[project.scripts]
+famiterm = "famiterm:main"
+famiterm-ssh = "famiterm.ssh:main"
+
+[project.urls]
+Homepage = "https://github.com/vxgmichel/famiterm"
+
+[tool.setuptools]
+packages = ["famiterm"]
+
+[tool.setuptools.package-data]
+famiterm = ["py.typed"]
 
 [tool.mypy]
 strict = true

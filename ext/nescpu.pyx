@@ -130,7 +130,7 @@ def run(cpu):
             sp += 1
             a = ram[0x0100 | sp]
             n = a >> 7
-            z = a == 0
+            z = a == 0  # Comment here for the nicest bug
             continue
         # PHP
         elif opc == 0x08:
