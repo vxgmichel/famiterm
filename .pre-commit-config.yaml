@@ -18,8 +18,8 @@ repos:
     hooks:
     - id: mypy
       additional_dependencies: [
-        "numpy>=1.20",
-        "gambaterm>=0.13.0",
+        "numpy>=2.0,<3",
+        "gambaterm>=1.0,<2",
         "types-setuptools",
       ]
       args: []

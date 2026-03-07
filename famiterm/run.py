@@ -1,11 +1,13 @@
 from __future__ import annotations
 from argparse import ArgumentParser, Namespace
 
+from pathlib import Path
 import pickle
 from copy import deepcopy
 from enum import IntEnum
 from functools import lru_cache
 from dataclasses import dataclass, field
+from typing import Callable
 import zlib
 
 
@@ -946,9 +948,14 @@ class Nes(Console):
     def add_console_arguments(cls, parser: ArgumentParser) -> None:
         pass
 
-    def __init__(self, parser_args: Namespace) -> None:
+    @classmethod
+    def pop_console_arguments(cls, namespace: Namespace) -> Callable[[], Console]:
+        romfile: Path = namespace.romfile
+        return lambda: cls(romfile)
+
+    def __init__(self, romfile: Path) -> None:
         self.current_state = 0
-        self.romfile = parser_args.romfile
+        super().__init__(romfile)
         self.cartridge = parse_ines(self.romfile)
         self.cpu = Cpu(
             self.cartridge,

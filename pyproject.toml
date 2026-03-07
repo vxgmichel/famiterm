@@ -12,7 +12,7 @@ name = "famiterm"
 version = "0.2.1"
 description = "A NES emulator running in the terminal"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "GPL-3.0-only"
 authors = [
     {name = "Vincent Michel", email = "vxgmichel@gmail.com"}
@@ -28,12 +28,12 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "numpy>=2.0,<3.0",
-    "gambaterm>=0.13.0",
+    "numpy>=2.0,<3",
+    "gambaterm>=1.0,<2",
 ]
 
 [project.optional-dependencies]
-controller-support = ["pygame>=1.9.5,<2.0.0"]
+controller-support = ["pygame>=1.9.5,<2"]
 
 [project.scripts]
 famiterm = "famiterm:main"
@@ -53,8 +53,7 @@ strict = true
 
 
 [tool.cibuildwheel]
-build = "cp*-win_amd64 cp*-manylinux_x86_64 cp*-macosx_x86_64 cp*-macosx_arm64"
-skip = ["cp38-*", "cp3??t-*"]
+skip = ["cp3??t-*", "cp*-musllinux_*"]
 test-command = "famiterm --help"
 
 [tool.cibuildwheel.linux]
