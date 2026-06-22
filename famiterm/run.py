@@ -25,6 +25,14 @@ class InfiniteLoop(Exception):
     pass
 
 
+class InstructionBudgetExhausted(Exception):
+    pass
+
+
+class UnsupportedCartridgeError(RuntimeError):
+    pass
+
+
 @dataclass
 class Cartridge:
     mapper: int
@@ -328,9 +336,6 @@ class Apu:
         register = ApuRegister(register)
         if register == register.FRAME_COUNTER:
             self.frame_counter_mode = value >> 7
-            if self.frame_counter_mode & 0x40:
-                # Clear frame interrupt flag
-                raise NotImplementedError
             return
         if register == register.STATUS:
             self.dmc_enabled = bool(value & 0x10)
@@ -377,16 +382,12 @@ class Apu:
             register.DMC_SAMPLE_ADDRESS,
             register.DMC_SAMPLE_LENGTH,
         ):
-            if register == register.DMC_LOAD_COUNTER:
-                return
-            raise NotImplementedError(register)
+            return
         assert False
 
     def generate_dmc(self) -> npt.NDArray[np.uint8]:
         result = np.zeros(Apu.TICKS_IN_FRAME, dtype=np.uint8)
-        if not self.dmc_enabled:
-            return result
-        raise NotImplementedError
+        return result
 
     def generate(self, audio: npt.NDArray[np.int16]) -> None:
         # self.pulse1.set_enabled(False)
@@ -533,13 +534,13 @@ class Ppu:
             # Sprite 0 Hit has been reached
             return 0x40
         if reg == PpuRegister.OAMADDR:
-            raise NotImplementedError
+            return self.oam_addr
         if reg == PpuRegister.OAMDATA:
-            raise NotImplementedError
+            return self.oam[self.oam_addr]
         if reg == PpuRegister.PPUSCROLL:
-            raise NotImplementedError
+            return 0
         if reg == PpuRegister.PPUADDR:
-            raise NotImplementedError
+            return 0
         if reg == PpuRegister.PPUDATA:
             result = self.ppu_read(self.ppu_addr)
             self.ppu_addr += self.ram_address_increment
@@ -558,7 +559,7 @@ class Ppu:
             self.mask = value
             return
         if reg == PpuRegister.PPUSTATUS:
-            raise NotImplementedError
+            return
         if reg == PpuRegister.OAMADDR:
             self.oam_addr = value
             return
@@ -596,10 +597,23 @@ class Ppu:
             return result
         # Ram access
         if 0x2000 <= addr < 0x3000:
-            raise NotImplementedError
+            a_addr = addr & 0x3FF
+            b_addr = (addr & 0x3FF) + 0x400
+            if 0x2000 <= addr < 0x2400:
+                addr = a_addr
+            elif 0x2400 <= addr < 0x2800:
+                addr = a_addr if self.cartridge.mirroring == "H" else b_addr
+            elif 0x2800 <= addr < 0x2C00:
+                addr = b_addr if self.cartridge.mirroring == "H" else a_addr
+            elif 0x2C00 <= addr < 0x3000:
+                addr = b_addr
+            else:
+                assert False
+            result, self.delayed_read = self.delayed_read, self.ram[addr]
+            return result
         # Palette access
-        if 0x3F00 <= addr < 0x3F10:
-            raise NotImplementedError
+        if 0x3F00 <= addr < 0x3F20:
+            return self.palette[addr & 0x1F]
         raise ValueError(f"Invalid PPU read: 0x{addr:04x}")
 
     def ppu_write(self, addr: int, value: int) -> None:
@@ -739,7 +753,6 @@ class Ppu:
     ) -> None:
         if not self.show_sprites:
             return
-        assert self.sprite_size == (8, 8)
         palette = self.palette
         pattern_table_address = self.sprite_pattern_table_address
         first_row = 8  # Hide first and last row like most monitors
@@ -758,7 +771,20 @@ class Ppu:
             palette_addr = 0x10 | (color_index << 2)
             colors = palette[palette_addr + 1 : palette_addr + 4]
             # Tile
-            tile = self.render_tile(pattern_addr, bytes(colors))
+            if self.sprite_size == (8, 8):
+                tile = self.render_tile(pattern_addr, bytes(colors))
+            else:
+                pattern_table_address = (index & 0x01) << 12
+                index &= 0xFE
+                top = self.render_tile(
+                    (index << 4) | pattern_table_address,
+                    bytes(colors),
+                )
+                bottom = self.render_tile(
+                    ((index + 1) << 4) | pattern_table_address,
+                    bytes(colors),
+                )
+                tile = np.vstack((top, bottom))
             # Vertical flip
             if attr & 0x80:
                 tile = tile[::-1, :]
@@ -800,6 +826,7 @@ class Cpu:
     # Tracking
     frame: int = 0
     instruction_count: int = 0
+    max_instructions_per_run: int = 200_000
 
     # IO
     input_value: int = 0
@@ -825,7 +852,16 @@ class Cpu:
             return self.ppu.read_register(self, addr & 0x7)
         # APU/IO access
         if 0x4000 <= addr < 0x4014:
-            raise NotImplementedError
+            return 0
+        # Sound channel status
+        if addr == 0x4015:
+            return (
+                (self.apu.pulse1.length_counter > 0)
+                | ((self.apu.pulse2.length_counter > 0) << 1)
+                | ((self.apu.triangle.length_counter > 0) << 2)
+                | ((self.apu.noise.length_counter > 0) << 3)
+                | (self.apu.dmc_enabled << 4)
+            )
         # Joystick 1 data
         if addr == 0x4016:
             result = self.input_value & 0x01
@@ -841,6 +877,10 @@ class Cpu:
         # Ram access
         if 0 <= addr < 0x0800:
             self.ram[addr] = value
+            return
+        # Mirror ram access
+        if 0x0800 <= addr < 0x2000:
+            self.ram[addr & 0x07FF] = value
             return
         # PPU access
         if 0x2000 <= addr < 0x2008:
@@ -867,6 +907,8 @@ class Cpu:
             self.apu.write_register(self, addr & 0x1F, value)
             return
         # Rom access
+        if 0x8000 <= addr < 0x10000:
+            return
         raise ValueError(f"Invalid write access: 0x{addr:04x} (pc=0x{self.pc:04x})")
 
     # Entry points
@@ -885,7 +927,10 @@ class Cpu:
     def run_instructions(self) -> None:
         jmp = 0x4C
         rti = 0x40
+        budget = 0x100
         opc = nescpu.run(self)
+        if opc == budget:
+            raise InstructionBudgetExhausted()
         # Slow run
         if opc == jmp:
             raise InfiniteLoop()
@@ -897,7 +942,8 @@ def parse_ines(source: str) -> Cartridge:
 
     with open(source, "rb") as input_file:
         header = input_file.read(16)
-        assert header[:4] == b"NES\x1a"
+        if header[:4] != b"NES\x1a":
+            raise ValueError(f"{source} is not an iNES ROM")
         prg_rom_size = header[4] * 16 * 1024
         chr_rom_size = header[5] * 8 * 1024
         flag6, flag7, flag8, flag9, flag10 = header[6:11]
@@ -913,8 +959,23 @@ def parse_ines(source: str) -> Cartridge:
         prg_rom = input_file.read(prg_rom_size)
         chr_rom = input_file.read(chr_rom_size)
 
-        assert input_file.read() == b""
+        if len(prg_rom) != prg_rom_size or len(chr_rom) != chr_rom_size:
+            raise ValueError(f"{source} is truncated")
 
+    if mapper != 0:
+        raise UnsupportedCartridgeError(
+            f"Unsupported NES mapper {mapper}; only mapper 0 (NROM) is supported"
+        )
+    if len(prg_rom) == 16 * 1024:
+        prg_rom *= 2
+    elif len(prg_rom) != 32 * 1024:
+        raise UnsupportedCartridgeError(
+            f"Unsupported mapper 0 PRG ROM size: {len(prg_rom)} bytes"
+        )
+    if len(chr_rom) != 8 * 1024:
+        raise UnsupportedCartridgeError(
+            f"Unsupported mapper 0 CHR ROM size: {len(chr_rom)} bytes"
+        )
     return Cartridge(
         mapper,
         mirroring,
@@ -966,7 +1027,7 @@ class Nes(Console):
         self.cpu.load_rst_entrypoint()
         try:
             self.cpu.run_instructions()
-        except InfiniteLoop:
+        except (InfiniteLoop, InstructionBudgetExhausted):
             pass
 
     @property
@@ -986,7 +1047,10 @@ class Nes(Console):
     ) -> tuple[bool, int]:
         self.ppu.new_vblank()
         self.cpu.load_nmi_entrypoint()
-        self.cpu.run_instructions()
+        try:
+            self.cpu.run_instructions()
+        except (InfiniteLoop, InstructionBudgetExhausted):
+            pass
         self.ppu.render(video)
         self.apu.generate(audio)
         return True, self.TICKS_IN_FRAME
@@ -1018,7 +1082,10 @@ class Nes(Console):
 
 
 def main(parser_args: tuple[str, ...] | None = None) -> None:
-    gambaterm_main(parser_args, console_cls=Nes)
+    try:
+        gambaterm_main(parser_args, console_cls=Nes)
+    except (UnsupportedCartridgeError, ValueError) as error:
+        raise SystemExit(str(error)) from None
 
 
 if __name__ == "__main__":

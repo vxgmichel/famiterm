@@ -1,4 +1,5 @@
 from setuptools import Extension, setup
+from Cython.Build import cythonize
 
 
 def get_extensions() -> list[Extension]:
@@ -20,11 +21,14 @@ def get_extensions() -> list[Extension]:
         include_dirs=[include_path],
         sources=["ext/nesapu.pyx"],
     )
-    return [
-        nescpu_extension,
-        nesppu_extension,
-        nesapu_extension,
-    ]
+    return cythonize(
+        [
+            nescpu_extension,
+            nesppu_extension,
+            nesapu_extension,
+        ],
+        compiler_directives={"language_level": "3"},
+    )
 
 
 setup(ext_modules=get_extensions())
