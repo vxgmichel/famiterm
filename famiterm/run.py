@@ -43,6 +43,179 @@ class Cartridge:
     trainer: bytes | None
     prg_rom: bytes
     chr_rom: bytes
+    prg_ram: bytearray = field(default_factory=lambda: bytearray(8 * 1024))
+    chr_ram: bytearray | None = None
+    mapped_prg_rom: bytes = b""
+    mmc1_shift_register: int = 0x10
+    mmc1_control: int = 0x0C
+    mmc1_chr_bank0: int = 0
+    mmc1_chr_bank1: int = 0
+    mmc1_prg_bank: int = 0
+
+    def __post_init__(self) -> None:
+        if self.chr_ram is None and not self.chr_rom:
+            self.chr_ram = bytearray(8 * 1024)
+        self.update_mirroring()
+        self.update_mapped_prg_rom()
+
+    def update_mirroring(self) -> None:
+        if self.mapper != 1:
+            return
+        mode = self.mmc1_control & 0x03
+        if mode == 0:
+            self.mirroring = "1L"
+        elif mode == 1:
+            self.mirroring = "1H"
+        elif mode == 2:
+            self.mirroring = "V"
+        else:
+            self.mirroring = "H"
+
+    @property
+    def prg_bank_count(self) -> int:
+        return len(self.prg_rom) // (16 * 1024)
+
+    @property
+    def chr_bank_count(self) -> int:
+        if self.chr_rom:
+            return len(self.chr_rom) // (4 * 1024)
+        assert self.chr_ram is not None
+        return len(self.chr_ram) // (4 * 1024)
+
+    def _prg_offset(self, bank: int, offset: int) -> int:
+        return ((bank % self.prg_bank_count) * 16 * 1024) + offset
+
+    def prg_bank(self, bank: int) -> bytes:
+        start = self._prg_offset(bank, 0)
+        return self.prg_rom[start : start + 16 * 1024]
+
+    def update_mapped_prg_rom(self) -> None:
+        if self.mapper == 0:
+            self.mapped_prg_rom = self.prg_rom
+            return
+        if self.mapper == 1:
+            prg_mode = (self.mmc1_control >> 2) & 0x03
+            if prg_mode in (0, 1):
+                bank = self.mmc1_prg_bank & ~0x01
+                self.mapped_prg_rom = self.prg_bank(bank) + self.prg_bank(bank + 1)
+            elif prg_mode == 2:
+                self.mapped_prg_rom = self.prg_bank(0) + self.prg_bank(self.mmc1_prg_bank)
+            else:
+                self.mapped_prg_rom = self.prg_bank(self.mmc1_prg_bank) + self.prg_bank(
+                    self.prg_bank_count - 1
+                )
+            return
+        raise UnsupportedCartridgeError(f"Unsupported NES mapper {self.mapper}")
+
+    def _chr_storage(self) -> bytes | bytearray:
+        return self.chr_rom if self.chr_rom else self.chr_ram
+
+    @property
+    def chr_cache_key(self) -> tuple[int, int, int, int]:
+        if self.mapper == 1:
+            return (
+                self.mapper,
+                self.mmc1_control & 0x10,
+                self.mmc1_chr_bank0,
+                self.mmc1_chr_bank1,
+            )
+        return (self.mapper, 0, 0, 0)
+
+    def _chr_offset(self, bank: int, offset: int) -> int:
+        return ((bank % self.chr_bank_count) * 4 * 1024) + offset
+
+    def cpu_read(self, addr: int) -> int:
+        if 0x6000 <= addr < 0x8000:
+            return self.prg_ram[addr - 0x6000]
+        if 0x8000 <= addr < 0x10000:
+            if self.mapper == 0:
+                return self.prg_rom[addr - 0x8000]
+            if self.mapper == 1:
+                prg_mode = (self.mmc1_control >> 2) & 0x03
+                offset = addr & 0x3FFF
+                if prg_mode in (0, 1):
+                    bank = self.mmc1_prg_bank & ~0x01
+                    if addr >= 0xC000:
+                        bank += 1
+                elif prg_mode == 2:
+                    bank = 0 if addr < 0xC000 else self.mmc1_prg_bank
+                else:
+                    bank = self.mmc1_prg_bank if addr < 0xC000 else self.prg_bank_count - 1
+                return self.prg_rom[self._prg_offset(bank, offset)]
+        raise ValueError(f"Invalid cartridge read: 0x{addr:04x}")
+
+    def cpu_write(self, addr: int, value: int) -> None:
+        if 0x6000 <= addr < 0x8000:
+            self.prg_ram[addr - 0x6000] = value
+            return
+        if 0x8000 <= addr < 0x10000:
+            if self.mapper == 0:
+                return
+            if self.mapper == 1:
+                self.write_mmc1_register(addr, value)
+                return
+        raise ValueError(f"Invalid cartridge write: 0x{addr:04x}")
+
+    def write_mmc1_register(self, addr: int, value: int) -> None:
+        if value & 0x80:
+            self.mmc1_shift_register = 0x10
+            self.mmc1_control |= 0x0C
+            self.update_mirroring()
+            self.update_mapped_prg_rom()
+            return
+        complete = self.mmc1_shift_register & 0x01
+        self.mmc1_shift_register >>= 1
+        self.mmc1_shift_register |= (value & 0x01) << 4
+        if not complete:
+            return
+        data = self.mmc1_shift_register & 0x1F
+        self.mmc1_shift_register = 0x10
+        if 0x8000 <= addr < 0xA000:
+            self.mmc1_control = data
+            self.update_mirroring()
+            self.update_mapped_prg_rom()
+        elif 0xA000 <= addr < 0xC000:
+            self.mmc1_chr_bank0 = data
+        elif 0xC000 <= addr < 0xE000:
+            self.mmc1_chr_bank1 = data
+        else:
+            self.mmc1_prg_bank = data & 0x0F
+            self.update_mapped_prg_rom()
+
+    def ppu_read(self, addr: int) -> int:
+        addr &= 0x1FFF
+        if self.mapper == 1:
+            chr_mode = (self.mmc1_control >> 4) & 0x01
+            if chr_mode == 0:
+                bank = self.mmc1_chr_bank0 & ~0x01
+                offset = addr & 0x0FFF
+                if addr >= 0x1000:
+                    bank += 1
+            else:
+                bank = self.mmc1_chr_bank0 if addr < 0x1000 else self.mmc1_chr_bank1
+                offset = addr & 0x0FFF
+            storage = self._chr_storage()
+            return storage[self._chr_offset(bank, offset)]
+        storage = self._chr_storage()
+        return storage[addr % len(storage)]
+
+    def ppu_write(self, addr: int, value: int) -> None:
+        if self.chr_ram is None:
+            return
+        addr &= 0x1FFF
+        if self.mapper == 1:
+            chr_mode = (self.mmc1_control >> 4) & 0x01
+            if chr_mode == 0:
+                bank = self.mmc1_chr_bank0 & ~0x01
+                offset = addr & 0x0FFF
+                if addr >= 0x1000:
+                    bank += 1
+            else:
+                bank = self.mmc1_chr_bank0 if addr < 0x1000 else self.mmc1_chr_bank1
+                offset = addr & 0x0FFF
+            self.chr_ram[self._chr_offset(bank, offset)] = value
+        else:
+            self.chr_ram[addr % len(self.chr_ram)] = value
 
 
 class ApuRegister(IntEnum):
@@ -282,7 +455,6 @@ class Noise:
             self.volume = value & 0xF
             return
         if register == register.NOISE_UNUSED:
-            raise NotImplementedError
             return
         if register == register.NOISE_PERIOD:
             self.noise_mode = bool(value & 0x80)
@@ -590,53 +762,55 @@ class Ppu:
         assert len(data) == 256
         self.oam[:] = data
 
+    def mirror_nametable_addr(self, addr: int) -> int:
+        mirrored = (addr - 0x2000) & 0x0FFF
+        table = mirrored >> 10
+        offset = mirrored & 0x03FF
+        mirroring = self.cartridge.mirroring
+        if mirroring == "H":
+            table = 0 if table in (0, 1) else 1
+        elif mirroring == "V":
+            table = 0 if table in (0, 2) else 1
+        elif mirroring == "1L":
+            table = 0
+        elif mirroring == "1H":
+            table = 1
+        else:
+            raise ValueError(f"Invalid nametable mirroring mode: {mirroring}")
+        return (table << 10) | offset
+
     def ppu_read(self, addr: int) -> int:
+        addr &= 0x3FFF
         # CHR rom access
         if 0x0000 <= addr < 0x2000:
-            result, self.delayed_read = self.delayed_read, self.cartridge.chr_rom[addr]
+            result, self.delayed_read = self.delayed_read, self.cartridge.ppu_read(addr)
             return result
+        if 0x3000 <= addr < 0x3F00:
+            addr -= 0x1000
         # Ram access
         if 0x2000 <= addr < 0x3000:
-            a_addr = addr & 0x3FF
-            b_addr = (addr & 0x3FF) + 0x400
-            if 0x2000 <= addr < 0x2400:
-                addr = a_addr
-            elif 0x2400 <= addr < 0x2800:
-                addr = a_addr if self.cartridge.mirroring == "H" else b_addr
-            elif 0x2800 <= addr < 0x2C00:
-                addr = b_addr if self.cartridge.mirroring == "H" else a_addr
-            elif 0x2C00 <= addr < 0x3000:
-                addr = b_addr
-            else:
-                assert False
+            addr = self.mirror_nametable_addr(addr)
             result, self.delayed_read = self.delayed_read, self.ram[addr]
             return result
         # Palette access
-        if 0x3F00 <= addr < 0x3F20:
+        if 0x3F00 <= addr < 0x4000:
             return self.palette[addr & 0x1F]
         raise ValueError(f"Invalid PPU read: 0x{addr:04x}")
 
     def ppu_write(self, addr: int, value: int) -> None:
+        addr &= 0x3FFF
         # Ram access
+        if 0x3000 <= addr < 0x3F00:
+            addr -= 0x1000
         if 0x2000 <= addr < 0x3000:
-            a_addr = addr & 0x3FF
-            b_addr = (addr & 0x3FF) + 0x400
-            if 0x2000 <= addr < 0x2400:
-                addr = a_addr
-            elif 0x2400 <= addr < 0x2800:
-                addr = a_addr if self.cartridge.mirroring == "H" else b_addr
-            elif 0x2800 <= addr < 0x2C00:
-                addr = b_addr if self.cartridge.mirroring == "H" else a_addr
-            elif 0x2C00 <= addr < 0x3000:
-                addr = b_addr
-            else:
-                assert False
-            if self.ram[addr] != value:
-                self.background_tile_changed.update(self.addr_to_indexes(addr))
-            self.ram[addr] = value
+            logical_addr = (addr - 0x2000) & 0x0FFF
+            physical_addr = self.mirror_nametable_addr(addr)
+            if self.ram[physical_addr] != value:
+                self.background_tile_changed.update(self.addr_to_indexes(logical_addr))
+            self.ram[physical_addr] = value
             return
         # Palette access
-        if 0x3F00 <= addr < 0x3F20:
+        if 0x3F00 <= addr < 0x4000:
             addr &= 0x1F
             if addr in (0x00, 0x04, 0x08, 0x0C):
                 self.palette[addr | 0x10] = value
@@ -647,6 +821,11 @@ class Ppu:
                     self.background_tiles_with_palette[addr >> 2]
                 )
             self.palette[addr] = value
+            return
+        # CHR RAM access
+        if 0x0000 <= addr < 0x2000:
+            self.cartridge.ppu_write(addr, value)
+            self.render_tile.cache_clear()
             return
         raise ValueError(f"Invalid PPU write: 0x{addr:04x}")
 
@@ -703,6 +882,8 @@ class Ppu:
             return
         # Get nametable
         pattern_ram_address, palette_ram_address = self.index_to_addr(y_index, x_index)
+        pattern_ram_address = self.mirror_nametable_addr(0x2000 + pattern_ram_address)
+        palette_ram_address = self.mirror_nametable_addr(0x2000 + palette_ram_address)
         # Get pattern address
         pattern_address = self.ram[pattern_ram_address]
         pattern_address = (pattern_address << 4) | base_pattern_address
@@ -719,7 +900,9 @@ class Ppu:
                 tile_set.discard(entry)
             self.background_tiles_with_palette[palette_address].add(entry)
         # Get tile
-        tile = self.render_tile(pattern_address, bytes(colors))
+        tile = self.render_tile(
+            pattern_address, bytes(colors), self.cartridge.chr_cache_key
+        )
         # Blit tile
         y_pixel = y_index << 3
         x_pixel = x_index << 3
@@ -772,17 +955,21 @@ class Ppu:
             colors = palette[palette_addr + 1 : palette_addr + 4]
             # Tile
             if self.sprite_size == (8, 8):
-                tile = self.render_tile(pattern_addr, bytes(colors))
+                tile = self.render_tile(
+                    pattern_addr, bytes(colors), self.cartridge.chr_cache_key
+                )
             else:
                 pattern_table_address = (index & 0x01) << 12
                 index &= 0xFE
                 top = self.render_tile(
                     (index << 4) | pattern_table_address,
                     bytes(colors),
+                    self.cartridge.chr_cache_key,
                 )
                 bottom = self.render_tile(
                     ((index + 1) << 4) | pattern_table_address,
                     bytes(colors),
+                    self.cartridge.chr_cache_key,
                 )
                 tile = np.vstack((top, bottom))
             # Vertical flip
@@ -795,9 +982,12 @@ class Ppu:
             nesppu.blit(tile, video, (y - first_row, x))
 
     @lru_cache(maxsize=None)
-    def render_tile(self, pattern_addr: int, colors: bytes) -> npt.NDArray[np.uint32]:
+    def render_tile(
+        self, pattern_addr: int, colors: bytes, chr_cache_key: tuple[int, int, int, int]
+    ) -> npt.NDArray[np.uint32]:
         result = np.zeros((8, 8), dtype=np.uint32)
-        nesppu.render_tile(self.cartridge.chr_rom, pattern_addr, colors, result)
+        tile_data = bytes(self.cartridge.ppu_read(pattern_addr + i) for i in range(16))
+        nesppu.render_tile(tile_data, 0, colors, result)
         return result
 
 
@@ -833,7 +1023,7 @@ class Cpu:
 
     @property
     def rom(self) -> bytes:
-        return self.cartridge.prg_rom
+        return self.cartridge.mapped_prg_rom
 
     # CPU Bus access
 
@@ -846,9 +1036,9 @@ class Cpu:
             return self.ram[addr & 0x07FF]
         # Rom access
         if 0x8000 <= addr < 0x10000:
-            return self.cartridge.prg_rom[addr - 0x8000]
+            return self.cartridge.cpu_read(addr)
         # PPU access
-        if 0x2000 <= addr < 0x2008:
+        if 0x2000 <= addr < 0x4000:
             return self.ppu.read_register(self, addr & 0x7)
         # APU/IO access
         if 0x4000 <= addr < 0x4014:
@@ -871,6 +1061,8 @@ class Cpu:
         if addr == 0x4017:
             return 0
         # Invalid access
+        if 0x6000 <= addr < 0x8000:
+            return self.cartridge.cpu_read(addr)
         raise ValueError(f"Invalid read access: 0x{addr:04x} (pc=0x{self.pc:04x})")
 
     def cpu_write(self, addr: int, value: int) -> None:
@@ -883,7 +1075,7 @@ class Cpu:
             self.ram[addr & 0x07FF] = value
             return
         # PPU access
-        if 0x2000 <= addr < 0x2008:
+        if 0x2000 <= addr < 0x4000:
             return self.ppu.write_register(self, addr & 0x7, value)
         # APU access
         if 0x4000 <= addr < 0x4014:
@@ -907,7 +1099,8 @@ class Cpu:
             self.apu.write_register(self, addr & 0x1F, value)
             return
         # Rom access
-        if 0x8000 <= addr < 0x10000:
+        if 0x6000 <= addr < 0x10000:
+            self.cartridge.cpu_write(addr, value)
             return
         raise ValueError(f"Invalid write access: 0x{addr:04x} (pc=0x{self.pc:04x})")
 
@@ -962,20 +1155,30 @@ def parse_ines(source: str) -> Cartridge:
         if len(prg_rom) != prg_rom_size or len(chr_rom) != chr_rom_size:
             raise ValueError(f"{source} is truncated")
 
-    if mapper != 0:
+    if mapper not in (0, 1):
         raise UnsupportedCartridgeError(
-            f"Unsupported NES mapper {mapper}; only mapper 0 (NROM) is supported"
+            f"Unsupported NES mapper {mapper}; only mapper 0 (NROM) and mapper 1 (MMC1) are supported"
         )
-    if len(prg_rom) == 16 * 1024:
-        prg_rom *= 2
-    elif len(prg_rom) != 32 * 1024:
-        raise UnsupportedCartridgeError(
-            f"Unsupported mapper 0 PRG ROM size: {len(prg_rom)} bytes"
-        )
-    if len(chr_rom) != 8 * 1024:
-        raise UnsupportedCartridgeError(
-            f"Unsupported mapper 0 CHR ROM size: {len(chr_rom)} bytes"
-        )
+    if mapper == 0:
+        if len(prg_rom) == 16 * 1024:
+            prg_rom *= 2
+        elif len(prg_rom) != 32 * 1024:
+            raise UnsupportedCartridgeError(
+                f"Unsupported mapper 0 PRG ROM size: {len(prg_rom)} bytes"
+            )
+        if len(chr_rom) not in (0, 8 * 1024):
+            raise UnsupportedCartridgeError(
+                f"Unsupported mapper 0 CHR ROM size: {len(chr_rom)} bytes"
+            )
+    elif mapper == 1:
+        if not prg_rom or len(prg_rom) % (16 * 1024):
+            raise UnsupportedCartridgeError(
+                f"Unsupported mapper 1 PRG ROM size: {len(prg_rom)} bytes"
+            )
+        if len(chr_rom) % (8 * 1024):
+            raise UnsupportedCartridgeError(
+                f"Unsupported mapper 1 CHR ROM size: {len(chr_rom)} bytes"
+            )
     return Cartridge(
         mapper,
         mirroring,

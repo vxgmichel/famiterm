@@ -14,7 +14,8 @@ def set_cpu_attributes(cpu, pc, a, x, y, sp, n, z, c, v, ic):
 
 
 def run(cpu):
-    cdef unsigned char* rom = cpu.rom
+    cdef object rom_obj = cpu.rom
+    cdef unsigned char* rom = rom_obj
     cdef unsigned char* ram = cpu.ram
     cdef unsigned short pc = cpu.pc
     cdef unsigned char a = cpu.a
@@ -113,7 +114,7 @@ def run(cpu):
         # Flow control
 
         # NOP
-        elif opc == 0xea:
+        elif opc in (0xea, 0x1a, 0x3a, 0x5a, 0x7a, 0xda, 0xfa):
             continue
         # RTI/BRK
         elif opc in (0x00, 0x40):
@@ -302,6 +303,13 @@ def run(cpu):
                 pc += <char>value
             continue
 
+        # Unofficial two-byte NOP variants used by some commercial ROMs.
+        elif opc in (
+            0x04, 0x14, 0x34, 0x44, 0x54, 0x64, 0x74, 0x80,
+            0x82, 0x89, 0xc2, 0xd4, 0xe2, 0xf4,
+        ):
+            continue
+
         # Store
 
         # STA ZPG/ZPX
@@ -323,6 +331,8 @@ def run(cpu):
             else:
                 set_cpu_attributes(cpu, pc, a, x, y, sp, n, z, c, v, ic)
                 cpu.cpu_write(address, a)
+                rom_obj = cpu.rom
+                rom = rom_obj
             continue
 
         # Load
@@ -488,6 +498,10 @@ def run(cpu):
         elif addressing == 0x07:
             address += x
 
+        # Unofficial three-byte NOP variants.
+        if opc in (0x0c, 0x1c, 0x3c, 0x5c, 0x7c, 0xdc, 0xfc):
+            continue
+
         # Store
 
         # STA ABS/ABX/ABY
@@ -497,6 +511,8 @@ def run(cpu):
             else:
                 set_cpu_attributes(cpu, pc, a, x, y, sp, n, z, c, v, ic)
                 cpu.cpu_write(address, a)
+                rom_obj = cpu.rom
+                rom = rom_obj
             continue
         # STX ABS
         if opc == 0x8e:
@@ -505,6 +521,8 @@ def run(cpu):
             else:
                 set_cpu_attributes(cpu, pc, a, x, y, sp, n, z, c, v, ic)
                 cpu.cpu_write(address, x)
+                rom_obj = cpu.rom
+                rom = rom_obj
             continue
         # STY ABS
         if opc == 0x8c:
@@ -513,6 +531,8 @@ def run(cpu):
             else:
                 set_cpu_attributes(cpu, pc, a, x, y, sp, n, z, c, v, ic)
                 cpu.cpu_write(address, y)
+                rom_obj = cpu.rom
+                rom = rom_obj
             continue
 
         # Flow control
@@ -612,6 +632,8 @@ def run(cpu):
             else:
                 set_cpu_attributes(cpu, pc, a, x, y, sp, n, z, c, v, ic)
                 cpu.cpu_write(address, value)
+                rom_obj = cpu.rom
+                rom = rom_obj
             continue
         # DEC ABS/ABX
         elif opc in (0xce, 0xde):
@@ -623,6 +645,8 @@ def run(cpu):
             else:
                 set_cpu_attributes(cpu, pc, a, x, y, sp, n, z, c, v, ic)
                 cpu.cpu_write(address, value)
+                rom_obj = cpu.rom
+                rom = rom_obj
             continue
         # ADC/SBC ABS/ABX/ABY
         elif opc in (0x6d, 0x7d, 0x79, 0xed, 0xfd, 0xf9):
@@ -674,6 +698,8 @@ def run(cpu):
             else:
                 set_cpu_attributes(cpu, pc, a, x, y, sp, n, z, c, v, ic)
                 cpu.cpu_write(address, value)
+                rom_obj = cpu.rom
+                rom = rom_obj
             continue
         # LSR ABS
         elif opc in (0x4e, 0x5e):
@@ -686,6 +712,8 @@ def run(cpu):
             else:
                 set_cpu_attributes(cpu, pc, a, x, y, sp, n, z, c, v, ic)
                 cpu.cpu_write(address, value)
+                rom_obj = cpu.rom
+                rom = rom_obj
             continue
         # ROL ABS
         elif opc in (0x2e, 0x3e):
@@ -700,6 +728,8 @@ def run(cpu):
             else:
                 set_cpu_attributes(cpu, pc, a, x, y, sp, n, z, c, v, ic)
                 cpu.cpu_write(address, value)
+                rom_obj = cpu.rom
+                rom = rom_obj
             continue
         # ROR ABS
         elif opc in (0x6e, 0x7e):
@@ -714,6 +744,8 @@ def run(cpu):
             else:
                 set_cpu_attributes(cpu, pc, a, x, y, sp, n, z, c, v, ic)
                 cpu.cpu_write(address, value)
+                rom_obj = cpu.rom
+                rom = rom_obj
             continue
         # BIT ABS
         elif opc == 0x2c:
