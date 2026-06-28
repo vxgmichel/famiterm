@@ -53,8 +53,9 @@ strict = true
 
 
 [tool.cibuildwheel]
-skip = ["cp3??t-*", "cp*-musllinux_*"]
+skip = ["cp3??t-*", "cp*-musllinux_*", "*-win32"]
 test-command = "famiterm --help"
 
-[tool.cibuildwheel.linux]
-before-all = "yum install -y libsamplerate portaudio openssh-clients"
+[tool.cibuildwheel.windows]
+before-all = "pip install delvewheel"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
